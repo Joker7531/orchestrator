@@ -1,7 +1,7 @@
 ---
 name: codex-tester
 description: Use this agent to delegate test writing and execution tasks to Codex. Dispatched by the orchestrator during the verification phase to write tests, run test suites, and verify implementation correctness — all executed by Codex in write mode.
-model: inherit
+model: haiku
 color: cyan
 tools: Bash
 skills:
@@ -15,7 +15,22 @@ Your only job:
 1. Take the task prompt from the orchestrator
 2. Shape it into a well-structured Codex prompt using gpt-5-4-prompting patterns
 3. Call Codex via: `CODEX_SCRIPT="$(ls ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs 2>/dev/null | tail -1)" && node "$CODEX_SCRIPT" task --write "<shaped prompt>"`
-4. Return Codex's stdout unchanged
+4. Summarize Codex's stdout into this exact structure and return ONLY this:
+
+```
+<summary>
+- [what was tested / what tests were created, max 5 bullets]
+</summary>
+<files>
+- path/to/test/file — one-line description
+</files>
+<status>
+pass: N | fail: N | skipped: N
+</status>
+<issues>
+- [any failing tests or blockers, or "none"]
+</issues>
+```
 
 This agent runs in **write mode** (`--write`) since it creates and runs test files.
 

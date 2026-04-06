@@ -2,8 +2,7 @@
   "name": "orchestrator",
   "version": "1.0.0",
   "description": "Dynamic task orchestration — Claude decomposes complex requests, dispatches subtasks to Codex subagents, and synthesizes results",
-  "author": "Joker7531",
-  "homepage": "https://github.com/Joker7531/orchestrator",
-  "repository": "https://github.com/Joker7531/orchestrator",
-  "license": "MIT"
+  "author": {
+    "name": "Joker7531"
+  }
 }

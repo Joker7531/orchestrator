@@ -1,6 +1,6 @@
 # orchestrator
 
-专为 Claude Code 设计的动态任务编排插件 — 将复杂请求分解为子任务，分派给 Codex 子代理，综合汇总结果。
+专为 Claude Code 设计的任务编排插件 — 保持主 agent 上下文干净，同时将繁重工作委托给成本更低的模型。
 
 [English](README.md)
 
@@ -8,9 +8,25 @@
 
 ---
 
-## 功能简介
+## 设计初衷
 
-orchestrator 插件让 Claude Code 能够以结构化的方式处理大型、多步骤的工程任务。当你调用 `/orchestrate` 时，Claude 会将你的请求分解为若干专注的子任务，并将它们分派给六个专业化的 Codex 子代理 — 每个代理针对不同角色进行了优化（探索、实现、测试、审查、研究、重构）。所有结果汇总后，Claude 会解决关键问题，并将简洁的摘要反馈给你。
+该插件围绕两个核心约束构建：
+
+**1. 保持主 agent 上下文干净**
+
+在复杂工程任务中，主 agent 的上下文窗口会被原始工具输出、文件内容和中间结果快速填满——这既影响推理质量，也推高了成本。orchestrator 让主 agent 只专注于决策。所有探索、实现和验证工作都卸载给子代理，这些子代理的原始输出不会直接出现在主 agent 的上下文中。
+
+**2. 将执行工作交给成本更低的模型**
+
+复杂任务不需要从头到尾都使用昂贵的模型。orchestrator 采用三层模型分级：
+
+```
+主 agent (opus)       — 任务分解、依赖管理、结果综合
+  └─ Wrapper (haiku)  — 提示词整形、结果压缩
+       └─ Codex (GPT) — 实际的文件读取、代码编写、测试运行
+```
+
+昂贵的推理集中在主 agent（少量高层决策），廉价的执行分散在 haiku wrapper 和 Codex——也就是工作量真正密集的地方。
 
 ---
 
@@ -31,100 +47,62 @@ claude plugin install https://github.com/Joker7531/orchestrator
 
 ---
 
-## 包含内容
-
-### 代理列表
-
-| 代理 | 模式 | 描述 |
-|---|---|---|
-| `codex-explorer` | 只读 | 代码库探索与架构映射 |
-| `codex-implementer` | 可写 | 代码实现、功能新增、缺陷修复 |
-| `codex-tester` | 可写 | 编写并运行测试 |
-| `codex-reviewer` | 只读 | 代码审查与质量分析 |
-| `codex-researcher` | 只读 | 网络研究与文档查阅 |
-| `codex-refactorer` | 可写 | 代码重构、重命名与整合 |
-
-### 命令
-
-| 命令 | 描述 |
-|---|---|
-| `/orchestrate <task>` | 入口命令 — 描述任意任务，Claude 将负责分解与分派 |
-
-### 技能
-
-| 文件 | 描述 |
-|---|---|
-| `skills/orchestrator/SKILL.md` | 自动触发技能 — 当任务涉及 3 个以上文件、多个实现步骤，或同时包含探索 + 实现 + 测试时自动激活 |
-
----
-
-## 使用示例
-
-**新增功能：**
+## 使用方法
 
 ```
 /orchestrate Add JWT authentication to this Express API
-```
-
-**重构现有代码：**
-
-```
 /orchestrate Refactor the database layer to use connection pooling
-```
-
-**修复全局类型错误：**
-
-```
 /orchestrate Find and fix all TypeScript type errors in src/
-```
-
-**为模块编写测试：**
-
-```
 /orchestrate Write unit tests for the auth module
 ```
+
+当 Claude 检测到任务横跨 3 个以上文件、包含多个实现步骤，或同时涉及探索 + 实现 + 测试时，也会自动触发编排模式。
 
 ---
 
 ## 工作原理
 
-orchestrator 遵循五阶段协议：
+### 三层执行模型
+
+每个子代理都是一个轻量级的 **haiku wrapper**——它的工作只有两件事：（1）将主 agent 的自然语言任务整形为结构化的 Codex 提示词；（2）将 Codex 的原始输出压缩为有界的结构化摘要，再返回给主 agent。
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  第 1 阶段 · 分析                                           │
-│  Claude 解析请求，分解为子任务，                            │
-│  等待用户确认后继续执行。                                   │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│  第 2 阶段 · 探索                                   ░░ ░░   │
-│  codex-explorer + codex-researcher 并行运行，               │
-│  完成代码库映射并收集背景上下文。                           │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│  第 3 阶段 · 执行                                           │
-│  codex-implementer + codex-refactorer 运行 —                │
-│  相互独立时并行，存在依赖时顺序执行。                       │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│  第 4 阶段 · 验证                                   ░░ ░░   │
-│  codex-tester + codex-reviewer 并行运行，                   │
-│  验证正确性与代码质量。                                     │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│  第 5 阶段 · 综合                                           │
-│  Claude 汇总所有结果，解决关键问题，                        │
-│  输出简洁摘要并给出后续步骤建议。                           │
-└─────────────────────────────────────────────────────────────┘
+主 agent 发出：
+  "探索认证模块的架构"
+
+Wrapper 整形为：
+  <task>探索 src/auth/ 架构</task>
+  <research_mode>区分事实与推断</research_mode>
+  <grounding_rules>每个结论必须引用具体文件路径</grounding_rules>
+  <structured_output_contract>返回：关键文件、依赖关系、开放问题</structured_output_contract>
+
+Codex 执行，Wrapper 压缩后返回：
+  <summary>
+  - AuthService 依赖 JwtStrategy 和 UserRepository
+  - Token 刷新逻辑在 src/auth/refresh.guard.ts
+  </summary>
+  <files>
+  - src/auth/auth.service.ts — 核心服务
+  - src/auth/refresh.guard.ts — token 刷新逻辑
+  </files>
+  <open_questions>
+  - 未在此范围内找到 token 过期配置
+  </open_questions>
 ```
 
-### 复杂度快捷路径
+主 agent 只看到压缩后的摘要，而不是 Codex 的原始输出。
 
-并非每个任务都需要完整的五个阶段。orchestrator 会自动选择合适的执行路径：
+### 五阶段协议
+
+```
+第 1 阶段 · 分析    Claude 分解任务，展示计划，等待用户确认
+第 2 阶段 · 探索    codex-explorer + codex-researcher 并行运行
+第 3 阶段 · 执行    codex-implementer + codex-refactorer（相互独立时并行）
+第 4 阶段 · 验证    codex-tester + codex-reviewer 并行运行
+第 5 阶段 · 综合    Claude 汇总摘要，解决关键问题，输出最终结果
+```
+
+并非每个任务都需要完整的五个阶段：
 
 | 任务类型 | 使用阶段 |
 |---|---|
@@ -133,6 +111,17 @@ orchestrator 遵循五阶段协议：
 | 大型功能开发 | 完整五阶段流程 |
 | 代码重构 | 探索 → 重构 → 测试 → 审查 |
 
+### 代理列表
+
+| 代理 | 模型 | 模式 | 职责 |
+|---|---|---|---|
+| `codex-explorer` | haiku | 只读 | 代码库探索与架构映射 |
+| `codex-implementer` | haiku | 可写 | 功能实现与缺陷修复 |
+| `codex-tester` | haiku | 可写 | 编写并运行测试 |
+| `codex-reviewer` | haiku | 只读 | 代码审查与质量分析 |
+| `codex-researcher` | haiku | 只读 | 网络研究与文档查阅 |
+| `codex-refactorer` | haiku | 可写 | 代码重构、重命名与整合 |
+
 ---
 
 ## 目录结构
@@ -140,32 +129,30 @@ orchestrator 遵循五阶段协议：
 ```
 orchestrator/
 ├── .claude-plugin/
-│   └── plugin.json          # 插件清单（名称、版本、描述）
+│   └── plugin.json          # 插件清单
 ├── agents/
-│   ├── codex-explorer.md    # 只读代理：代码库与架构映射
-│   ├── codex-implementer.md # 可写代理：功能实现与缺陷修复
-│   ├── codex-refactorer.md  # 可写代理：代码重构与整合
-│   ├── codex-researcher.md  # 只读代理：网络研究与文档查阅
-│   ├── codex-reviewer.md    # 只读代理：代码审查与质量分析
-│   └── codex-tester.md      # 可写代理：测试编写与执行
+│   ├── codex-explorer.md    # 只读 wrapper：探索与架构映射
+│   ├── codex-implementer.md # 可写 wrapper：功能实现与缺陷修复
+│   ├── codex-refactorer.md  # 可写 wrapper：代码重构与整合
+│   ├── codex-researcher.md  # 只读 wrapper：网络研究与文档查阅
+│   ├── codex-reviewer.md    # 只读 wrapper：代码审查与质量分析
+│   └── codex-tester.md      # 可写 wrapper：测试编写与执行
 ├── commands/
-│   └── orchestrate.md       # /orchestrate 斜杠命令定义
+│   └── orchestrate.md       # /orchestrate 斜杠命令
 └── skills/
     └── orchestrator/
-        └── SKILL.md         # 多步骤任务自动触发技能
+        └── SKILL.md         # 自动触发技能
 ```
 
 ---
 
 ## 参与贡献
 
-欢迎提交 Pull Request。对于重大变更，请先提 Issue 说明你希望修改的内容。
+欢迎提交 Pull Request。对于重大变更，请先提 Issue 说明。
 
 1. Fork 仓库：https://github.com/Joker7531/orchestrator
 2. 创建功能分支：`git checkout -b feature/my-feature`
-3. 提交更改：`git commit -m 'Add my feature'`
-4. 推送分支：`git push origin feature/my-feature`
-5. 发起 Pull Request
+3. 提交更改，并向 `develop` 分支发起 Pull Request
 
 ---
 

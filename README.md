@@ -1,6 +1,6 @@
 # orchestrator
 
-Dynamic task orchestration for Claude Code — decompose complex requests, dispatch subtasks to Codex subagents, synthesize results.
+Task orchestration plugin for Claude Code — keeps your main agent context clean while delegating heavy lifting to cheaper models.
 
 [中文](README.zh-CN.md)
 
@@ -8,9 +8,25 @@ Dynamic task orchestration for Claude Code — decompose complex requests, dispa
 
 ---
 
-## What It Does
+## Design Goals
 
-The orchestrator plugin gives Claude Code a structured way to tackle large, multi-step engineering tasks. When you invoke `/orchestrate`, Claude decomposes your request into focused subtasks and dispatches them to six specialized Codex subagents — each optimized for a different role (exploration, implementation, testing, review, research, refactoring). Results are collected, critical issues are resolved, and a clean summary is presented back to you.
+This plugin was built around two constraints:
+
+**1. Keep the main agent context clean**
+
+In long engineering tasks, the main agent's context window fills up with raw tool outputs, file contents, and intermediate results — making it harder to reason clearly and increasing costs. The orchestrator keeps the main agent focused on decisions only. All exploration, implementation, and verification work is offloaded to subagents whose outputs never appear directly in the main context.
+
+**2. Reduce cost by using cheaper models for execution**
+
+Complex tasks don't need an expensive model end-to-end. The orchestrator uses a three-tier model hierarchy:
+
+```
+Main agent (opus)       — task decomposition, dependency management, synthesis
+  └─ Wrapper (haiku)    — prompt shaping, result compression
+       └─ Codex (GPT)   — actual file reads, code writes, test runs
+```
+
+Expensive reasoning is concentrated in the main agent (a small number of high-level decisions). Cheap execution is distributed across haiku wrappers and Codex — where the volume of work actually lives.
 
 ---
 
@@ -31,100 +47,62 @@ claude plugin install https://github.com/Joker7531/orchestrator
 
 ---
 
-## What's Included
-
-### Agents
-
-| Agent | Mode | Description |
-|---|---|---|
-| `codex-explorer` | read-only | Codebase exploration and architecture mapping |
-| `codex-implementer` | write | Code implementation, feature additions, bug fixes |
-| `codex-tester` | write | Write and run tests |
-| `codex-reviewer` | read-only | Code review and quality analysis |
-| `codex-researcher` | read-only | Web research and documentation lookup |
-| `codex-refactorer` | write | Restructure, rename, and consolidate code |
-
-### Commands
-
-| Command | Description |
-|---|---|
-| `/orchestrate <task>` | Entry point — describe any task and Claude will handle decomposition and dispatch |
-
-### Skills
-
-| File | Description |
-|---|---|
-| `skills/orchestrator/SKILL.md` | Auto-trigger skill — activates automatically when a task involves 3+ files, multiple implementation steps, or a combination of exploration + implementation + testing |
-
----
-
-## Usage / Workflow Examples
-
-**Add a new feature:**
+## Usage
 
 ```
 /orchestrate Add JWT authentication to this Express API
-```
-
-**Refactor existing code:**
-
-```
 /orchestrate Refactor the database layer to use connection pooling
-```
-
-**Fix type errors across the codebase:**
-
-```
 /orchestrate Find and fix all TypeScript type errors in src/
-```
-
-**Write tests for a module:**
-
-```
 /orchestrate Write unit tests for the auth module
 ```
+
+The orchestrator also triggers automatically when Claude detects a task that spans 3+ files, multiple implementation steps, or a combination of exploration + implementation + testing.
 
 ---
 
 ## How It Works
 
-The orchestrator follows a 5-phase protocol:
+### The three-tier execution model
+
+Each subagent is a lightweight **haiku wrapper** — its only job is to (1) shape the main agent's natural-language task into a precise, structured Codex prompt, and (2) compress Codex's raw output into a bounded structured summary before returning it to the main agent.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Phase 1 · Analysis                                         │
-│  Claude parses the request, decomposes into subtasks,       │
-│  and waits for your confirmation before proceeding.         │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│  Phase 2 · Exploration                              ░░ ░░   │
-│  codex-explorer + codex-researcher run in parallel          │
-│  to map the codebase and gather background context.         │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│  Phase 3 · Execution                                        │
-│  codex-implementer + codex-refactorer run —                 │
-│  parallel where independent, sequential where dependent.    │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│  Phase 4 · Verification                             ░░ ░░   │
-│  codex-tester + codex-reviewer run in parallel              │
-│  to validate correctness and code quality.                  │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
-│  Phase 5 · Synthesis                                        │
-│  Claude collects all results, resolves critical issues,     │
-│  and presents a clean summary with next steps.              │
-└─────────────────────────────────────────────────────────────┘
+Main agent sends:
+  "Explore the auth module architecture"
+
+Wrapper shapes into:
+  <task>Explore src/auth/ architecture</task>
+  <research_mode>Separate facts from inferences</research_mode>
+  <grounding_rules>Cite file paths for every claim</grounding_rules>
+  <structured_output_contract>Return: key files, dependencies, open questions</structured_output_contract>
+
+Codex executes, wrapper compresses and returns:
+  <summary>
+  - AuthService depends on JwtStrategy and UserRepository
+  - Token refresh handled in src/auth/refresh.guard.ts
+  </summary>
+  <files>
+  - src/auth/auth.service.ts — core service
+  - src/auth/refresh.guard.ts — token refresh logic
+  </files>
+  <open_questions>
+  - Token expiry config not found in this scope
+  </open_questions>
 ```
 
-### Complexity Shortcuts
+The main agent only ever sees the compressed summary — not the raw Codex output.
 
-Not every task needs all five phases. The orchestrator picks the right path automatically:
+### Five-phase protocol
+
+```
+Phase 1 · Analysis      Claude decomposes the task, presents a plan, waits for confirmation
+Phase 2 · Exploration   codex-explorer + codex-researcher run in parallel
+Phase 3 · Execution     codex-implementer + codex-refactorer (parallel where independent)
+Phase 4 · Verification  codex-tester + codex-reviewer run in parallel
+Phase 5 · Synthesis     Claude collects summaries, resolves issues, presents final result
+```
+
+Not every task needs all five phases:
 
 | Task type | Phases used |
 |---|---|
@@ -133,6 +111,17 @@ Not every task needs all five phases. The orchestrator picks the right path auto
 | Large feature | full 5-phase flow |
 | Refactoring | explore → refactor → test → review |
 
+### Agents
+
+| Agent | Model | Mode | Role |
+|---|---|---|---|
+| `codex-explorer` | haiku | read-only | Codebase exploration and architecture mapping |
+| `codex-implementer` | haiku | write | Feature implementation and bug fixes |
+| `codex-tester` | haiku | write | Write and run tests |
+| `codex-reviewer` | haiku | read-only | Code review and quality analysis |
+| `codex-researcher` | haiku | read-only | Web research and documentation lookup |
+| `codex-refactorer` | haiku | write | Restructure, rename, and consolidate code |
+
 ---
 
 ## Architecture
@@ -140,32 +129,30 @@ Not every task needs all five phases. The orchestrator picks the right path auto
 ```
 orchestrator/
 ├── .claude-plugin/
-│   └── plugin.json          # Plugin manifest (name, version, description)
+│   └── plugin.json          # Plugin manifest
 ├── agents/
-│   ├── codex-explorer.md    # Read-only agent: codebase and architecture mapping
-│   ├── codex-implementer.md # Write agent: feature implementation and bug fixes
-│   ├── codex-refactorer.md  # Write agent: restructure and consolidate code
-│   ├── codex-researcher.md  # Read-only agent: web research and docs lookup
-│   ├── codex-reviewer.md    # Read-only agent: code review and quality analysis
-│   └── codex-tester.md      # Write agent: test authoring and execution
+│   ├── codex-explorer.md    # Read-only wrapper: exploration and architecture mapping
+│   ├── codex-implementer.md # Write wrapper: implementation and bug fixes
+│   ├── codex-refactorer.md  # Write wrapper: restructure and consolidate
+│   ├── codex-researcher.md  # Read-only wrapper: web research and docs
+│   ├── codex-reviewer.md    # Read-only wrapper: code review
+│   └── codex-tester.md      # Write wrapper: test authoring and execution
 ├── commands/
-│   └── orchestrate.md       # /orchestrate slash command definition
+│   └── orchestrate.md       # /orchestrate slash command
 └── skills/
     └── orchestrator/
-        └── SKILL.md         # Auto-trigger skill for multi-step tasks
+        └── SKILL.md         # Auto-trigger skill
 ```
 
 ---
 
 ## Contributing
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+Pull requests are welcome. For major changes, please open an issue first.
 
 1. Fork the repository: https://github.com/Joker7531/orchestrator
-2. Create your feature branch: `git checkout -b feature/my-feature`
-3. Commit your changes: `git commit -m 'Add my feature'`
-4. Push to the branch: `git push origin feature/my-feature`
-5. Open a pull request
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Commit your changes and open a pull request against `develop`
 
 ---
 
