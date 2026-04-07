@@ -92,24 +92,54 @@ Codex executes, wrapper compresses and returns:
 
 The main agent only ever sees the compressed summary — not the raw Codex output.
 
+### Contract Registry
+
+The orchestrator maintains a **CONTRACTS.md** file at the project root as the single source of truth for all public interfaces between modules. This eliminates the need for the main agent to read code files when wiring subagents together.
+
+The information flows in one direction:
+
+```
+codex-implementer finishes a batch
+  └─ returns <interface_contract> block in its output
+
+codex-architect reads the produced files
+  └─ updates CONTRACTS.md
+  └─ returns <contract_summary> to the orchestrator
+
+orchestrator injects <contract_summary> into next batch as <upstream_contracts>
+  └─ downstream implementers read interfaces from prompt, not from disk
+```
+
+The main agent reads code files **only when a critical error cannot be diagnosed from agent outputs alone**.
+
 ### Five-phase protocol
 
 ```
 Phase 1 · Analysis      Claude decomposes the task, presents a plan, waits for confirmation
 Phase 2 · Exploration   codex-explorer + codex-researcher run in parallel
-Phase 3 · Execution     codex-implementer + codex-refactorer (parallel where independent)
+Phase 3 · Execution     implementation batches, each followed by codex-architect
 Phase 4 · Verification  codex-tester + codex-reviewer run in parallel
 Phase 5 · Synthesis     Claude collects summaries, resolves issues, presents final result
+```
+
+Phase 3 uses a batch-architect pattern for multi-module tasks:
+
+```
+Batch A (parallel implementers)
+  └─ Batch A.arch: codex-architect → updates CONTRACTS.md, returns contract_summary
+Batch B (parallel implementers, receive Batch A contracts via upstream_contracts)
+  └─ Batch B.arch: codex-architect → updates CONTRACTS.md, returns contract_summary
+...
 ```
 
 Not every task needs all five phases:
 
 | Task type | Phases used |
 |---|---|
-| Simple bug fix | explore → implement → test |
+| Simple single-module fix | implement (no architect needed) |
+| Multi-module feature | full flow with architect between each batch |
 | Pure research | researcher only |
-| Large feature | full 5-phase flow |
-| Refactoring | explore → refactor → test → review |
+| Refactoring | explore → refactor → architect → test → review |
 
 ### Agents
 
@@ -118,12 +148,15 @@ Each agent has two layers: a **wrapper** (haiku) that shapes prompts and compres
 | Agent | Wrapper | Executor | Mode | Role |
 |---|---|---|---|---|
 | `codex-explorer` | haiku | Codex (GPT) | read-only | Codebase exploration and architecture mapping |
-| `codex-implementer` | haiku | Codex (GPT) | write | Feature implementation and bug fixes |
+| `codex-implementer` | haiku | Codex (GPT) | write | Feature implementation and bug fixes; returns `<interface_contract>` |
+| `codex-architect` | haiku | Codex (GPT) | write\* | Reads produced files, updates CONTRACTS.md, returns `<contract_summary>` |
 | `codex-tester` | haiku | Codex (GPT) | write | Write and run tests |
 | `codex-reviewer` | haiku | Codex (GPT) | read-only | Code review and quality analysis |
 | `codex-researcher` | haiku | Codex (GPT) | read-only | Web research and documentation lookup |
 | `codex-refactorer` | haiku | Codex (GPT) | write | Restructure, rename, and consolidate code |
 | `codex-server` | haiku | Codex (GPT) | — | Remote server command execution, log monitoring, status checks |
+
+\* `codex-architect` writes only to CONTRACTS.md — never to production code files.
 
 ---
 
@@ -134,6 +167,7 @@ orchestrator/
 ├── .claude-plugin/
 │   └── plugin.json          # Plugin manifest
 ├── agents/
+│   ├── codex-architect.md   # Write wrapper: contract extraction, CONTRACTS.md maintenance
 │   ├── codex-explorer.md    # Read-only wrapper: exploration and architecture mapping
 │   ├── codex-implementer.md # Write wrapper: implementation and bug fixes
 │   ├── codex-refactorer.md  # Write wrapper: restructure and consolidate

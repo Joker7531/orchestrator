@@ -90,18 +90,98 @@ Evaluation revealed two gaps against the plugin's original design goals:
 
 ---
 
+## v1.2.0 — 2026-04-07 · Contract Registry & Architecture Agent
+
+### Changes
+
+**New agent: `codex-architect`**
+- Dedicated subagent for interface contract extraction and CONTRACTS.md maintenance
+- Dispatched by the orchestrator after each implementation batch
+- Reads the files produced in that batch, extracts all public symbols with signatures
+- Appends or updates entries in CONTRACTS.md under `## <module>` headings
+- Detects conflicts when the same symbol appears with different signatures across modules
+- Returns `<contract_summary>` block for the orchestrator to forward to the next batch
+- Writes only to CONTRACTS.md — never modifies production code
+
+**Modified: `codex-implementer`**
+- Now returns a mandatory `<interface_contract>` block at the end of every response
+- Accepts an `<upstream_contracts>` block injected by the orchestrator (from the previous architect step), eliminating the need to read dependency files from disk
+- Output schema: `<summary>` + `<files>` + `<verification>` + `<residual_risks>` + `<interface_contract>`
+
+**Modified: `commands/orchestrate.md`**
+- Added **Contract Registry Protocol** section at the top of the protocol
+- Updated Phase 3 to use batch-architect pattern: each implementation batch is followed by one `codex-architect` call before the next batch begins
+- Updated Phase 5 to dispatch architect after any fix-up implementation
+- Added rule: main agent reads code files only on critical errors undiagnosable from agent outputs
+- Updated agent type list in Phase 1 to include `codex-architect`
+- Updated plan format to show `Batch A → Batch A.arch → Batch B → ...` structure
+- Updated complexity shortcuts table
+
+### Design decisions
+
+**Why a dedicated architect agent instead of embedding contract extraction in the implementer?**
+
+Separation of concerns. The implementer's job is to produce working code — asking it to also accurately introspect and document its own interface introduces a second cognitive task that can be done poorly under pressure (e.g., when debugging). The architect agent reads the *finished* files with no other goal, making its output more reliable.
+
+**Why CONTRACTS.md instead of a structured format like JSON?**
+
+Markdown is readable by both agents and humans without parsing. The orchestrator injects contract blocks verbatim into agent prompts — JSON would require quoting and escaping. Markdown sections (`## module`) are also easy to append to without collision.
+
+**Why does the architect use `--write` mode if it only writes CONTRACTS.md?**
+
+Codex requires `--write` for any file modification. The scope constraint ("only write to CONTRACTS.md") is enforced by the prompt's `<action_safety>` clause, not by a technical read-only restriction.
+
+### Information flow diagram
+
+```
+Batch A implementers
+  └─ each returns <interface_contract>
+
+codex-architect (Batch A.arch)
+  ├─ reads: files produced by Batch A
+  ├─ writes: CONTRACTS.md (append/update)
+  └─ returns: <contract_summary>
+       └─ orchestrator stores in memory
+
+Batch B implementers
+  ├─ receive: <upstream_contracts> = contract_summary from A.arch
+  └─ each returns <interface_contract>
+
+codex-architect (Batch B.arch)
+  ├─ reads: files produced by Batch B
+  ├─ writes: CONTRACTS.md (append/update, conflict check)
+  └─ returns: <contract_summary>
+       └─ orchestrator stores in memory (replaces previous)
+
+...
+
+codex-tester / codex-reviewer
+  └─ receive: CONTRACTS.md path for interface consistency check
+```
+
+### Testing
+
+- Full E2E test: 3-layer Python CLI (storage → manager → cli) with mocked tests
+- 10/10 unit tests passed
+- All three implementation batches completed without interface mismatches
+- Main agent read zero code files during the run (interfaces were carried in prompts)
+- One tester agent required re-dispatch (returned status update instead of results) — retry logic remains a planned improvement
+
+---
+
 ## Planned Improvements
 
 ### Agent enhancements
 - [ ] Add `codex-debugger` agent specialized for runtime error diagnosis
 - [ ] Add `codex-documenter` agent for generating inline docs and changelogs
-- [ ] Support agent retry logic when a subagent returns incomplete results
+- [ ] Support agent retry logic when a subagent returns incomplete results (observed in v1.2.0 testing)
 
 ### Orchestration protocol
 - [ ] Add Phase 0: context detection (auto-detect language, framework, test runner)
 - [ ] Support task dependency graph visualization in the plan output
 - [ ] Add user preference memory: remember preferred agent patterns per project type
 - [ ] Support partial plan execution (skip specific phases on user request)
+- [ ] Auto-detect single-module vs multi-module tasks to skip architect step when not needed
 
 ### UX improvements
 - [ ] Add progress indicator during long multi-agent runs
@@ -111,7 +191,7 @@ Evaluation revealed two gaps against the plugin's original design goals:
 ### Quality & reliability
 - [ ] Add validation step to check agent results meet acceptance criteria before synthesis
 - [ ] Add timeout handling for long-running Codex tasks
-- [ ] Add structured output format for agent results (JSON schema)
+- [ ] CONTRACTS.md schema validation to catch malformed contract entries
 
 ### Distribution
 - [ ] Submit to Claude Code official marketplace

@@ -92,24 +92,54 @@ Codex 执行，Wrapper 压缩后返回：
 
 主 agent 只看到压缩后的摘要，而不是 Codex 的原始输出。
 
+### 合约注册表
+
+orchestrator 在项目根目录维护一个 **CONTRACTS.md** 文件，作为所有模块间公开接口的唯一事实来源。这使主 agent 在串联各 subagent 时无需读取代码文件。
+
+信息沿单一方向流动：
+
+```
+codex-implementer 完成一个批次
+  └─ 在输出中返回 <interface_contract> 块
+
+codex-architect 读取产出文件
+  └─ 更新 CONTRACTS.md
+  └─ 向 orchestrator 返回 <contract_summary>
+
+orchestrator 将 <contract_summary> 以 <upstream_contracts> 形式注入下一批次
+  └─ 下游 implementer 从 prompt 中读取接口，无需访问磁盘
+```
+
+主 agent 仅在**关键错误无法从 agent 输出中诊断时**才读取代码文件。
+
 ### 五阶段协议
 
 ```
 第 1 阶段 · 分析    Claude 分解任务，展示计划，等待用户确认
 第 2 阶段 · 探索    codex-explorer + codex-researcher 并行运行
-第 3 阶段 · 执行    codex-implementer + codex-refactorer（相互独立时并行）
+第 3 阶段 · 执行    多个实现批次，每批次后跟一个 codex-architect
 第 4 阶段 · 验证    codex-tester + codex-reviewer 并行运行
 第 5 阶段 · 综合    Claude 汇总摘要，解决关键问题，输出最终结果
+```
+
+第 3 阶段对多模块任务采用批次-架构师模式：
+
+```
+批次 A（并行 implementer）
+  └─ 批次 A.arch：codex-architect → 更新 CONTRACTS.md，返回 contract_summary
+批次 B（并行 implementer，通过 upstream_contracts 接收批次 A 的合约）
+  └─ 批次 B.arch：codex-architect → 更新 CONTRACTS.md，返回 contract_summary
+...
 ```
 
 并非每个任务都需要完整的五个阶段：
 
 | 任务类型 | 使用阶段 |
 |---|---|
-| 简单缺陷修复 | 探索 → 实现 → 测试 |
+| 简单单模块修复 | 仅实现（无需架构师） |
+| 多模块功能开发 | 完整流程，每批次间插入架构师步骤 |
 | 纯研究任务 | 仅研究代理 |
-| 大型功能开发 | 完整五阶段流程 |
-| 代码重构 | 探索 → 重构 → 测试 → 审查 |
+| 代码重构 | 探索 → 重构 → 架构师 → 测试 → 审查 |
 
 ### 代理列表
 
@@ -118,12 +148,15 @@ Codex 执行，Wrapper 压缩后返回：
 | 代理 | Wrapper | Executor | 模式 | 职责 |
 |---|---|---|---|---|
 | `codex-explorer` | haiku | Codex (GPT) | 只读 | 代码库探索与架构映射 |
-| `codex-implementer` | haiku | Codex (GPT) | 可写 | 功能实现与缺陷修复 |
+| `codex-implementer` | haiku | Codex (GPT) | 可写 | 功能实现与缺陷修复；返回 `<interface_contract>` |
+| `codex-architect` | haiku | Codex (GPT) | 可写\* | 读取产出文件，更新 CONTRACTS.md，返回 `<contract_summary>` |
 | `codex-tester` | haiku | Codex (GPT) | 可写 | 编写并运行测试 |
 | `codex-reviewer` | haiku | Codex (GPT) | 只读 | 代码审查与质量分析 |
 | `codex-researcher` | haiku | Codex (GPT) | 只读 | 网络研究与文档查阅 |
 | `codex-refactorer` | haiku | Codex (GPT) | 可写 | 代码重构、重命名与整合 |
 | `codex-server` | haiku | Codex (GPT) | — | 远程服务器命令执行、日志监控、状态检查 |
+
+\* `codex-architect` 仅写入 CONTRACTS.md，不修改任何生产代码文件。
 
 ---
 
@@ -134,6 +167,7 @@ orchestrator/
 ├── .claude-plugin/
 │   └── plugin.json          # 插件清单
 ├── agents/
+│   ├── codex-architect.md   # 可写 wrapper：合约提取，维护 CONTRACTS.md
 │   ├── codex-explorer.md    # 只读 wrapper：探索与架构映射
 │   ├── codex-implementer.md # 可写 wrapper：功能实现与缺陷修复
 │   ├── codex-refactorer.md  # 可写 wrapper：代码重构与整合
