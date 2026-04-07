@@ -69,6 +69,27 @@ Evaluation revealed two gaps against the plugin's original design goals:
 
 ---
 
+## v1.1.0 — 2026-04-07 · Server Agent & Model Disambiguation
+
+### Changes
+
+**New agent: `codex-server`**
+- Dedicated subagent for remote server operations via SSH
+- Supports command execution, log monitoring, file inspection, and status checks
+- Follows the same haiku wrapper → Codex executor pattern as other agents
+- Includes safety rules: no destructive commands (rm -rf, shutdown, reboot) without explicit authorization
+- Structured return format: `<summary>` + `<server_state>` + `<action_taken>` + `<issues>`
+
+**Fix: Agent model disambiguation in README**
+- Agent table previously listed "Model: haiku" which was ambiguous — haiku is the wrapper, not the executor
+- Replaced single "Model" column with "Wrapper" (haiku) and "Executor" (Codex / GPT) columns
+- Added explanatory note above the table in both EN and ZH READMEs
+
+**Updated orchestrate command**
+- Added `codex-server` to the agent type list in Phase 1 analysis
+
+---
+
 ## Planned Improvements
 
 ### Agent enhancements

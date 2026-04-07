@@ -25,6 +25,7 @@ Follow these phases in order. Skip phases that don't apply (e.g., a simple typo 
    - `codex-reviewer` — code review, quality analysis (read-only)
    - `codex-researcher` — web research, documentation lookup (read-only)
    - `codex-refactorer` — restructure, rename, consolidate (write)
+   - `codex-server` — remote server command execution, log monitoring, status checks
 3. Decompose into specific subtasks with dependency annotations:
    - Independent tasks → will run in parallel
    - Dependent tasks → will run sequentially

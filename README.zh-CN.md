@@ -113,14 +113,17 @@ Codex 执行，Wrapper 压缩后返回：
 
 ### 代理列表
 
-| 代理 | 模型 | 模式 | 职责 |
-|---|---|---|---|
-| `codex-explorer` | haiku | 只读 | 代码库探索与架构映射 |
-| `codex-implementer` | haiku | 可写 | 功能实现与缺陷修复 |
-| `codex-tester` | haiku | 可写 | 编写并运行测试 |
-| `codex-reviewer` | haiku | 只读 | 代码审查与质量分析 |
-| `codex-researcher` | haiku | 只读 | 网络研究与文档查阅 |
-| `codex-refactorer` | haiku | 可写 | 代码重构、重命名与整合 |
+每个代理分两层：**wrapper**（haiku）负责提示词整形和结果压缩，**executor**（Codex / GPT）执行实际工作。"Wrapper" 列为提示词整形所用的 Claude 模型；真正的执行始终发生在 Codex 内部。
+
+| 代理 | Wrapper | Executor | 模式 | 职责 |
+|---|---|---|---|---|
+| `codex-explorer` | haiku | Codex (GPT) | 只读 | 代码库探索与架构映射 |
+| `codex-implementer` | haiku | Codex (GPT) | 可写 | 功能实现与缺陷修复 |
+| `codex-tester` | haiku | Codex (GPT) | 可写 | 编写并运行测试 |
+| `codex-reviewer` | haiku | Codex (GPT) | 只读 | 代码审查与质量分析 |
+| `codex-researcher` | haiku | Codex (GPT) | 只读 | 网络研究与文档查阅 |
+| `codex-refactorer` | haiku | Codex (GPT) | 可写 | 代码重构、重命名与整合 |
+| `codex-server` | haiku | Codex (GPT) | — | 远程服务器命令执行、日志监控、状态检查 |
 
 ---
 
@@ -136,6 +139,7 @@ orchestrator/
 │   ├── codex-refactorer.md  # 可写 wrapper：代码重构与整合
 │   ├── codex-researcher.md  # 只读 wrapper：网络研究与文档查阅
 │   ├── codex-reviewer.md    # 只读 wrapper：代码审查与质量分析
+│   ├── codex-server.md      # 服务器 wrapper：SSH 命令执行与监控
 │   └── codex-tester.md      # 可写 wrapper：测试编写与执行
 ├── commands/
 │   └── orchestrate.md       # /orchestrate 斜杠命令

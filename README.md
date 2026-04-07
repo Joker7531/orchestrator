@@ -113,14 +113,17 @@ Not every task needs all five phases:
 
 ### Agents
 
-| Agent | Model | Mode | Role |
-|---|---|---|---|
-| `codex-explorer` | haiku | read-only | Codebase exploration and architecture mapping |
-| `codex-implementer` | haiku | write | Feature implementation and bug fixes |
-| `codex-tester` | haiku | write | Write and run tests |
-| `codex-reviewer` | haiku | read-only | Code review and quality analysis |
-| `codex-researcher` | haiku | read-only | Web research and documentation lookup |
-| `codex-refactorer` | haiku | write | Restructure, rename, and consolidate code |
+Each agent has two layers: a **wrapper** (haiku) that shapes prompts and compresses results, and an **executor** (Codex / GPT) that does the actual work. The "Wrapper" column shows the Claude model used for prompt shaping; the real execution always happens inside Codex.
+
+| Agent | Wrapper | Executor | Mode | Role |
+|---|---|---|---|---|
+| `codex-explorer` | haiku | Codex (GPT) | read-only | Codebase exploration and architecture mapping |
+| `codex-implementer` | haiku | Codex (GPT) | write | Feature implementation and bug fixes |
+| `codex-tester` | haiku | Codex (GPT) | write | Write and run tests |
+| `codex-reviewer` | haiku | Codex (GPT) | read-only | Code review and quality analysis |
+| `codex-researcher` | haiku | Codex (GPT) | read-only | Web research and documentation lookup |
+| `codex-refactorer` | haiku | Codex (GPT) | write | Restructure, rename, and consolidate code |
+| `codex-server` | haiku | Codex (GPT) | — | Remote server command execution, log monitoring, status checks |
 
 ---
 
@@ -136,6 +139,7 @@ orchestrator/
 │   ├── codex-refactorer.md  # Write wrapper: restructure and consolidate
 │   ├── codex-researcher.md  # Read-only wrapper: web research and docs
 │   ├── codex-reviewer.md    # Read-only wrapper: code review
+│   ├── codex-server.md      # Server wrapper: SSH command execution, monitoring
 │   └── codex-tester.md      # Write wrapper: test authoring and execution
 ├── commands/
 │   └── orchestrate.md       # /orchestrate slash command
